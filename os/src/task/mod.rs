@@ -15,8 +15,10 @@ mod switch;
 mod task;
 
 use crate::config::MAX_APP_NUM;
+use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_us;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -54,6 +56,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            task_start_time:0,
+            task_syscall_times:[0;MAX_SYSCALL_NUM]
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -81,6 +85,8 @@ impl TaskManager {
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
+        //设置task0 开始时间
+        task0.task_start_time= get_time_us();
         drop(inner);
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
@@ -125,6 +131,10 @@ impl TaskManager {
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
+            // 设置task启动时间 参考 https://cloud.tsinghua.edu.cn/f/17a7c9d9b57f4838ae5f/ (自己的想法也类似，想通过restore返回的地址来判断应用初次运行)
+            if inner.tasks[next].task_start_time==0 {
+                inner.tasks[next].task_start_time=get_time_us()
+            }
             drop(inner);
             // before this, we should drop local variables that must be dropped manually
             unsafe {
@@ -135,6 +145,51 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+}
+
+impl TaskManager{
+    /// 统计某个系统调用次数
+    fn add_current_syscall_times(&self,syscall_id:usize){
+        let mut inner=self.inner.exclusive_access();
+        let current_task=inner.current_task;
+        inner.tasks[current_task].task_syscall_times[syscall_id]+=1;
+    }
+    /// 返回系统调用统计
+    fn get_current_syscall_times(&self)->[u32;MAX_SYSCALL_NUM]{
+        let  inner=self.inner.exclusive_access();
+        let current_task=inner.current_task;
+        inner.tasks[current_task].task_syscall_times
+    }
+    /// get_current_start_time
+    fn get_current_start_time(&self)->usize{
+        let  inner=self.inner.exclusive_access();
+        let current_task=inner.current_task;
+        inner.tasks[current_task].task_start_time
+    }
+    /// get_current_status
+    fn get_current_status(&self)->TaskStatus{
+        let  inner=self.inner.exclusive_access();
+        let current_task=inner.current_task;
+        inner.tasks[current_task].task_status
+    }
+}
+
+/// add_syscall_times
+pub fn add_syscall_times(syscall_id:usize){
+    TASK_MANAGER.add_current_syscall_times(syscall_id);
+}
+
+/// get_current_syscall_times
+pub fn get_current_syscall_times()->[u32;MAX_SYSCALL_NUM]{
+    TASK_MANAGER.get_current_syscall_times()
+}
+/// get_current_start_time
+pub fn get_current_start_time()->usize{
+    TASK_MANAGER.get_current_start_time()
+}
+/// get_current_status
+pub fn get_current_status()->TaskStatus{
+    TASK_MANAGER.get_current_status()
 }
 
 /// Run the first task in task list.
