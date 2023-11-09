@@ -300,6 +300,56 @@ impl MemorySet {
             false
         }
     }
+    /// mmap
+    pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
+        let vpn_range = VPNRange::new(
+            VirtAddr::from(start).floor(),
+            VirtAddr::from(start + len).ceil(),
+        );
+        for vpn in vpn_range {
+           if let Some(pte) = self.page_table.translate(vpn){
+            if  pte.is_valid() {
+                return -1;
+            }
+        }
+    }
+        // 先设置
+      let mut map_perm_u=  MapPermission::U;
+      if(port&1)!=0{
+        map_perm_u|=MapPermission::R;
+      }
+      if(port&2)!=0{
+        map_perm_u|=MapPermission::W;
+      }
+      if(port&4)!=0{
+        map_perm_u|=MapPermission::X;
+      }
+      self.insert_framed_area(VirtAddr::from(start), VirtAddr::from(start+len), map_perm_u);
+      0
+    }
+   
+    /// unmap
+    pub fn unmap(&mut self,start: usize, len: usize) -> isize {
+        let vpn_range = VPNRange::new(
+            VirtAddr::from(start).floor(),
+            VirtAddr::from(start + len).ceil(),
+        );
+        for vpn in vpn_range {
+            let pte = self.page_table.translate(vpn);
+            if pte.is_none() || !pte.unwrap().is_valid() {
+                return -1;
+            }
+        }
+        for vpn in vpn_range {
+            for area in &mut self.areas{
+                // check 是否已经被分配
+                if vpn>=area.vpn_range.get_start()&&vpn <area.vpn_range.get_end(){
+                    area.unmap_one(&mut self.page_table, vpn)
+                }
+            } 
+        }
+        0
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

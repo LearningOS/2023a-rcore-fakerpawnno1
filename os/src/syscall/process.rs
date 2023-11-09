@@ -8,8 +8,13 @@ use crate::{
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, TaskStatus,
+        get_current_syscall_times, get_current_status, get_current_start_time,get_current_physical_address,mmap,unmap
     },
-};
+
+    timer::get_time_us,
+    mm::VirtAddr
+   };
+
 
 #[repr(C)]
 #[derive(Debug)]
@@ -117,41 +122,74 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let us=get_time_us();
+    let sec=us/1000000;
+    let usec=us%1000000;
+    let start = ts as *const u8;
+    let k_ts =get_current_physical_address(start) as * mut TimeVal;
+    unsafe {
+      *k_ts= TimeVal{
+        sec:sec,
+        usec:usec
+      }
+    }
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let vp=ti as *const u8;
+    let k_ti=get_current_physical_address(vp) as * mut TaskInfo;
+    unsafe{
+        *k_ti=TaskInfo{
+            status: get_current_status(),
+            syscall_times: get_current_syscall_times(),
+            time: (get_time_us()-get_current_start_time())/1000
+        }
+    }
+    0
 }
 
+
 /// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // 页属性错误
+    if port & !0x7 as usize != 0 || port & 0x7 as usize == 0 {
+        return -1;
+    }
+    // 虚拟地址没有对齐 
+    if VirtAddr::from(start).page_offset()!=0 {
+        return -1;
+    }
+    mmap(start,len,port)
 }
 
 /// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // 虚拟地址没有对齐 
+    if VirtAddr::from(start).page_offset()!=0 {
+        return -1;
+    }
+    unmap(start, len)
 }
 
 /// change data segment size

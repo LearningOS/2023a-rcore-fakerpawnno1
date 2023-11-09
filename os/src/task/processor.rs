@@ -7,11 +7,12 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
+use crate::config::MAX_SYSCALL_NUM;
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_us;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
-
 /// Processor management structure
 pub struct Processor {
     ///The task currently executing on the current processor
@@ -61,6 +62,10 @@ pub fn run_tasks() {
             let mut task_inner = task.inner_exclusive_access();
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
             task_inner.task_status = TaskStatus::Running;
+            // set start time
+            if task_inner.get_start_time() == 0 {
+                task_inner.task_start_time = get_time_us();
+            }
             // release coming task_inner manually
             drop(task_inner);
             // release coming task TCB manually
@@ -108,4 +113,60 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
+}
+
+/// add_syscall_times
+pub fn add_current_syscall_times(syscall_id: usize) {
+    take_current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .add_syscall_times(syscall_id);
+}
+
+/// get_current_syscall_times
+pub fn get_current_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_syscall_times()
+}
+
+/// get_current_start_time
+pub fn get_current_start_time() -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_start_time()
+}
+
+/// get_current_status
+pub fn get_current_status() -> TaskStatus {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_status()
+}
+
+/// get ptr physical address in current task
+pub fn get_current_physical_address(ptr: *const u8) -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_physical_address_from_token(ptr)
+}
+
+/// current task mmap vp from start to start+len with perm port
+pub fn mmap(start: usize, len: usize, port: usize) -> isize {
+    take_current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .mmap(start, len, port)
+}
+
+/// current task unmap vp from start to start+len
+pub fn unmap(start: usize, len: usize) -> isize {
+    take_current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .unmap(start, len)
 }
