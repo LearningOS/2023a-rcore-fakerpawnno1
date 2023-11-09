@@ -22,6 +22,7 @@ use crate::config::MAX_SYSCALL_NUM;
 use crate::timer::get_time_us;
 use lazy_static::*;
 use switch::__switch;
+use crate::mm::{PageTable, PhysAddr, VirtAddr};
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -85,7 +86,6 @@ impl TaskManager {
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
-        let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         //设置task0 开始时间
         task0.task_start_time= get_time_us();
         drop(inner);
@@ -120,7 +120,7 @@ impl TaskManager {
         (current + 1..current + self.num_app + 1)
             .map(|id| id % self.num_app)
             .find(|id| inner.tasks[*id].task_status == TaskStatus::Ready)
-    }
+}
 
     /// Get the current 'Running' task's token.
     fn get_current_token(&self) -> usize {
@@ -192,6 +192,25 @@ impl TaskManager{
         let current_task=inner.current_task;
         inner.tasks[current_task].task_status
     }
+    /// get physical address from user space token
+    fn get_physical_address_from_token(&self,token: usize,ptr: *const u8)->usize{
+        let page_table=PageTable::from_token(token);
+        let va=VirtAddr::from(ptr as usize);
+        let ppn=page_table.translate(va.floor()).unwrap().ppn();
+        PhysAddr::from(ppn).0 + va.page_offset()
+    }
+    /// mmap
+    fn mmap(&self, start: usize, len: usize, port: usize) -> isize {
+        let mut inner=self.inner.exclusive_access();
+        let current_task=inner.current_task;
+        inner.tasks[current_task].memory_set.mmap(start, len, port)
+    }
+    /// unmap
+    fn unmap(&self, start: usize, len: usize) -> isize {
+        let mut inner=self.inner.exclusive_access();
+        let current_task=inner.current_task;
+        inner.tasks[current_task].memory_set.unmap(start,len)
+    }
 }
 
 /// add_syscall_times
@@ -258,4 +277,18 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// get ptr physical address in current task 
+pub fn get_current_physical_address(ptr: *const u8) -> usize {
+    let token=current_user_token();
+    TASK_MANAGER.get_physical_address_from_token(token,ptr)
+}
+/// current task mmap vp from start to start+len with perm port
+pub fn mmap(start: usize, len: usize, port: usize) -> isize {
+    TASK_MANAGER.mmap(start, len, port)
+}
+/// current task unmap vp from start to start+len
+pub fn unmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.unmap(start, len)
 }
