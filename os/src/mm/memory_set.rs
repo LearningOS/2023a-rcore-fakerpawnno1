@@ -83,7 +83,7 @@ impl MemorySet {
         self.areas.push(map_area);
     }
     /// Mention that trampoline is not collected by areas.
-    fn map_trampoline(&mut self) {
+   pub fn map_trampoline(&mut self) {
         self.page_table.map(
             VirtAddr::from(TRAMPOLINE).into(),
             PhysAddr::from(strampoline as usize).into(),
@@ -327,7 +327,7 @@ impl MemorySet {
       self.insert_framed_area(VirtAddr::from(start), VirtAddr::from(start+len), map_perm_u);
       0
     }
-   
+
     /// unmap
     pub fn unmap(&mut self,start: usize, len: usize) -> isize {
         let vpn_range = VPNRange::new(
@@ -346,7 +346,7 @@ impl MemorySet {
                 if vpn>=area.vpn_range.get_start()&&vpn <area.vpn_range.get_end(){
                     area.unmap_one(&mut self.page_table, vpn)
                 }
-            } 
+            }
         }
         0
     }

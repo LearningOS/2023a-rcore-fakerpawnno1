@@ -7,12 +7,13 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
-use crate::config::MAX_SYSCALL_NUM;
+use crate::config::{MAX_SYSCALL_NUM, BIG_STRIDE};
 use crate::sync::UPSafeCell;
 use crate::timer::get_time_us;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
+
 /// Processor management structure
 pub struct Processor {
     ///The task currently executing on the current processor
@@ -62,6 +63,7 @@ pub fn run_tasks() {
             let mut task_inner = task.inner_exclusive_access();
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
             task_inner.task_status = TaskStatus::Running;
+            task_inner.task_stride+=BIG_STRIDE/task_inner.task_priority;
             // set start time
             if task_inner.get_start_time() == 0 {
                 task_inner.task_start_time = get_time_us();
@@ -117,7 +119,7 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
 
 /// add_syscall_times
 pub fn add_current_syscall_times(syscall_id: usize) {
-    take_current_task()
+    current_task()
         .unwrap()
         .inner_exclusive_access()
         .add_syscall_times(syscall_id);
@@ -157,7 +159,7 @@ pub fn get_current_physical_address(ptr: *const u8) -> usize {
 
 /// current task mmap vp from start to start+len with perm port
 pub fn mmap(start: usize, len: usize, port: usize) -> isize {
-    take_current_task()
+    current_task()
         .unwrap()
         .inner_exclusive_access()
         .mmap(start, len, port)
@@ -165,7 +167,7 @@ pub fn mmap(start: usize, len: usize, port: usize) -> isize {
 
 /// current task unmap vp from start to start+len
 pub fn unmap(start: usize, len: usize) -> isize {
-    take_current_task()
+    current_task()
         .unwrap()
         .inner_exclusive_access()
         .unmap(start, len)

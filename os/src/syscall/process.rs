@@ -1,20 +1,19 @@
 //! Process management syscalls
 use alloc::sync::Arc;
 
+
 use crate::{
     config::MAX_SYSCALL_NUM,
     loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str},
+    mm::{VirtAddr},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
-        get_current_syscall_times, get_current_status, get_current_start_time,get_current_physical_address,mmap,unmap
+        get_current_physical_address, get_current_start_time, get_current_status,
+        get_current_syscall_times, mmap, suspend_current_and_run_next, unmap, TaskStatus,
     },
-
     timer::get_time_us,
-    mm::VirtAddr
-   };
-
+};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -84,7 +83,11 @@ pub fn sys_exec(path: *const u8) -> isize {
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    trace!("kernel::pid[{}] sys_waitpid [{}]", current_task().unwrap().pid.0, pid);
+    trace!(
+        "kernel::pid[{}] sys_waitpid [{}]",
+        current_task().unwrap().pid.0,
+        pid
+    );
     let task = current_task().unwrap();
     // find a child process
 
@@ -127,16 +130,16 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    let us=get_time_us();
-    let sec=us/1000000;
-    let usec=us%1000000;
+    let us = get_time_us();
+    let sec = us / 1000000;
+    let usec = us % 1000000;
     let start = ts as *const u8;
-    let k_ts =get_current_physical_address(start) as * mut TimeVal;
+    let k_ts = get_current_physical_address(start) as *mut TimeVal;
     unsafe {
-      *k_ts= TimeVal{
-        sec:sec,
-        usec:usec
-      }
+        *k_ts = TimeVal {
+            sec: sec,
+            usec: usec,
+        }
     }
     0
 }
@@ -149,18 +152,17 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    let vp=ti as *const u8;
-    let k_ti=get_current_physical_address(vp) as * mut TaskInfo;
-    unsafe{
-        *k_ti=TaskInfo{
+    let vp = ti as *const u8;
+    let k_ti = get_current_physical_address(vp) as *mut TaskInfo;
+    unsafe {
+        *k_ti = TaskInfo {
             status: get_current_status(),
             syscall_times: get_current_syscall_times(),
-            time: (get_time_us()-get_current_start_time())/1000
+            time: (get_time_us() - get_current_start_time()) / 1000,
         }
     }
     0
 }
-
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
@@ -172,11 +174,11 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     if port & !0x7 as usize != 0 || port & 0x7 as usize == 0 {
         return -1;
     }
-    // 虚拟地址没有对齐 
-    if VirtAddr::from(start).page_offset()!=0 {
+    // 虚拟地址没有对齐
+    if VirtAddr::from(start).page_offset() != 0 {
         return -1;
     }
-    mmap(start,len,port)
+    mmap(start, len, port)
 }
 
 /// YOUR JOB: Implement munmap.
@@ -185,8 +187,8 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    // 虚拟地址没有对齐 
-    if VirtAddr::from(start).page_offset()!=0 {
+    // 虚拟地址没有对齐
+    if VirtAddr::from(start).page_offset() != 0 {
         return -1;
     }
     unmap(start, len)
@@ -204,19 +206,31 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let task = current_task().unwrap();
+        let spawn_task=task.spawn(data);
+        let new_pid = spawn_task.pid.0;
+        add_task(spawn_task);
+        new_pid as isize
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let current_task = current_task().unwrap();
+    let mut inner = current_task.inner_exclusive_access();
+    inner.set_priority(prio)
 }
